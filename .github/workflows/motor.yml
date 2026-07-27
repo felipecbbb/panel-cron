@@ -1,0 +1,42 @@
+name: Motor del panel (crons)
+
+# Dispara la cadena diaria del panel SIN depender del cron de Vercel
+# (que falla de forma intermitente). Corre en la infra de GitHub.
+on:
+  schedule:
+    - cron: "0 8 * * *"   # 08:00 UTC = 09:00 Canarias (verano) / 08:00 (invierno)
+  workflow_dispatch: {}   # lanzar a mano desde la pestaña Actions
+
+permissions:
+  contents: write          # heartbeat: mantiene vivo el schedule
+
+jobs:
+  motor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Disparar los crons del panel
+        env:
+          PANEL_URL: ${{ secrets.PANEL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          hit () {
+            code=$(curl -s -o /tmp/r -w "%{http_code}" --max-time 300 \
+              -H "Authorization: Bearer $CRON_SECRET" "$PANEL_URL/api/cron/$1")
+            echo "-> $1 : HTTP $code : $(head -c 300 /tmp/r)"
+          }
+          hit actualidad
+          hit publicar
+          hit inbox
+          hit captar
+          hit outbound
+          hit followup
+          echo "Cadena completada."
+      - name: Heartbeat (evita que GitHub desactive el schedule a los 60 días)
+        if: always()
+        run: |
+          echo "$(date -u +%FT%TZ) motor ejecutado" >> runs.log
+          git config user.name "panel-cron"
+          git config user.email "actions@users.noreply.github.com"
+          git add runs.log && git commit -m "run $(date -u +%F)" || true
+          git push || true
